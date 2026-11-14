@@ -77,6 +77,10 @@ class JarvisVM(app: Application) : AndroidViewModel(app) {
 
     fun logout() { store.token = ""; loggedIn = false; status = null; online = false }
 
+    fun createVoiceSession(onState: (String) -> Unit, onError: (String) -> Unit): VoiceSession {
+        return VoiceSession(getApplication(), store.baseUrl, store.token, onState, onError)
+    }
+
     private suspend fun refreshStatus() {
         try {
             val s = withContext(Dispatchers.IO) { api.get("/api/status") }
