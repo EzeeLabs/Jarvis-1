@@ -68,7 +68,18 @@ class InAppVoiceBridge:
                 max_size=8 * 1024 * 1024,
             ) as oai:
                 self.oai = oai
+                # Follow the Realtime session lifecycle: wait for session.created,
+                # apply configuration, then wait for session.updated before audio.
+                first = json.loads(await asyncio.wait_for(oai.recv(), timeout=15))
+                if first.get("type") != "session.created":
+                    raise RuntimeError(f"Unexpected Realtime handshake event: {first.get('type')}")
                 await self.send_oai({"type": "session.update", "session": self.session_config()})
+                while True:
+                    update = json.loads(await asyncio.wait_for(oai.recv(), timeout=15))
+                    if update.get("type") == "error":
+                        raise RuntimeError("Realtime rejected the JARVIS session configuration")
+                    if update.get("type") == "session.updated":
+                        break
                 await self.send_oai({
                     "type": "response.create",
                     "response": {
@@ -151,7 +162,13 @@ class InAppVoiceBridge:
             "type": "conversation.item.create",
             "item": {"type": "function_call_output", "call_id": call_id, "output": result},
         })
-        if name != "end_call":
+        if name == "end_call":
+            self.closed = True
+            try:
+                await self.app_ws.close(code=1000, reason="JARVIS ended the voice session")
+            except Exception:
+                pass
+        else:
             await self.send_oai({"type": "response.create"})
 
     async def session_limit(self):
