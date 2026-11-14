@@ -11,6 +11,7 @@ from app.config import Settings
 from app.db import DB
 from app.exotel import ExotelError
 from app.realtime import Bridge, Chunker, build_instructions
+from app.voice import InAppVoiceBridge
 from app.security import RateLimiter, check_token, hash_password, make_token, verify_password
 from app.timeutil import IST, iso, parse
 
@@ -408,6 +409,49 @@ class BridgeTest(unittest.TestCase):
         t = build_instructions(db, {}, datetime(2026, 11, 14, 14, 30, tzinfo=timezone.utc))
         self.assertIn("AI assistant", t)
         self.assertIn("08:00 PM IST", t)
+
+
+
+class InAppVoice(unittest.TestCase):
+    def test_android_audio_is_forwarded_to_realtime(self):
+        class AppSocket:
+            def __init__(self):
+                self.events = [
+                    {"type": "audio", "audio": "AQID"},
+                    {"type": "end"},
+                ]
+                self.sent = []
+
+            async def receive_json(self):
+                return self.events.pop(0)
+
+            async def send_json(self, event):
+                self.sent.append(event)
+
+        class OpenAISocket:
+            def __init__(self):
+                self.sent = []
+
+            async def send(self, event):
+                self.sent.append(json.loads(event))
+
+        async def go():
+            app_ws = AppSocket()
+            bridge = InAppVoiceBridge(app_ws, DB(":memory:"), settings())
+            bridge.oai = OpenAISocket()
+            await bridge.from_android()
+            self.assertEqual(bridge.oai.sent, [
+                {"type": "input_audio_buffer.append", "audio": "AQID"}
+            ])
+
+        asyncio.run(go())
+
+    def test_session_uses_pcm24k_and_configured_voice(self):
+        bridge = InAppVoiceBridge(None, DB(":memory:"), settings(openai_voice="cedar"))
+        session = bridge.session_config()
+        self.assertEqual(session["audio"]["input"]["format"], {"type": "audio/pcm", "rate": 24000})
+        self.assertEqual(session["audio"]["output"]["format"], {"type": "audio/pcm", "rate": 24000})
+        self.assertEqual(session["audio"]["output"]["voice"], "cedar")
 
 
 if __name__ == "__main__":
