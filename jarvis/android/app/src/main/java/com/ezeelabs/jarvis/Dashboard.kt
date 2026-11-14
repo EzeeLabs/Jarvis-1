@@ -130,19 +130,23 @@ fun Dashboard(vm: JarvisVM, onStartCall: () -> Unit) {
 
 @Composable
 fun CallCard(vm: JarvisVM, onStartCall: () -> Unit) {
+    val voiceReady = vm.status?.optBoolean("voice_enabled") == true
     Panel {
         Text("JARVIS voice assistant", color = Muted)
         Text("Talk to JARVIS through the app — no normal phone call required.", color = MaterialTheme.colorScheme.onSurface)
         Button(
             onClick = onStartCall,
-            enabled = vm.online,
+            enabled = vm.online && voiceReady,
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) {
             Text("Start voice session · 3 min", fontSize = 16.sp)
         }
         Text(
-            if (vm.online) "The three-minute countdown and OnePlus-inspired call screen are ready for UI testing."
-            else "Connect to your JARVIS server to start. The in-app voice engine is still being built.",
+            when {
+                !vm.online -> "Connect to your JARVIS server to start."
+                !voiceReady -> "Add an OpenAI API key to the backend to enable live AI voice."
+                else -> "Allow microphone access, then keep the app open during the three-minute countdown."
+            },
             color = Muted, fontSize = 12.sp
         )
     }
