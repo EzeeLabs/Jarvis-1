@@ -108,8 +108,11 @@ class InAppVoiceBridge:
             log.exception("in-app realtime connection failed")
             await self.send_app({"type": "error", "message": "Could not connect to the AI voice service. Check server configuration and API access."})
         finally:
+            try:
+                await self.app_ws.send_json({"type": "state", "state": "ended"})
+            except Exception:
+                pass
             self.closed = True
-            await self.send_app({"type": "state", "state": "ended"})
 
     async def from_android(self):
         while True:
