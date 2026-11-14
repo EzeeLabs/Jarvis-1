@@ -90,23 +90,18 @@ fun InAppCallScreen(vm: JarvisVM, onEnd: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
-        if (permissionGranted) {
-            voiceState = "countdown"
-        } else {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        if (!permissionGranted) permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
 
     LaunchedEffect(permissionGranted) {
         if (permissionGranted) {
-            while (secondsLeft > 0 && voiceState !in listOf("error", "ended")) {
+            voiceState = "countdown"
+            while (secondsLeft > 0) {
                 delay(1000)
                 secondsLeft -= 1
             }
-            if (secondsLeft == 0 && voiceState == "countdown") {
-                voiceState = "connecting"
-                session.connect()
-            }
+            voiceState = "connecting"
+            session.connect()
         }
     }
 
