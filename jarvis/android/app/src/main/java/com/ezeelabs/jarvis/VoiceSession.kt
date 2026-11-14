@@ -39,6 +39,7 @@ class VoiceSession(
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val running = AtomicBoolean(false)
+    private val released = AtomicBoolean(false)
     private val muted = AtomicBoolean(false)
     private val speaker = AtomicBoolean(true)
     private val playbackExecutor = Executors.newSingleThreadExecutor()
@@ -90,10 +91,13 @@ class VoiceSession(
                                 }
                             }
                         }
-                        "state" -> onState(event.optString("state", "listening"))
+                        "state" -> {
+                            val next = event.optString("state", "listening")
+                            onState(if (muted.get() && next !in listOf("ended", "ending", "error")) "muted" else next)
+                        }
                         "transcript" -> {
                             val role = event.optString("role")
-                            onState(if (role == "jarvis") "speaking" else "listening")
+                            onState(if (muted.get()) "muted" else if (role == "jarvis") "speaking" else "listening")
                         }
                         "error" -> onError(event.optString("message", "Voice session error"))
                         "pong" -> Unit
@@ -208,6 +212,7 @@ class VoiceSession(
     }
 
     private fun releaseAudio() {
+        if (!released.compareAndSet(false, true)) return
         running.set(false)
         try { recorder?.stop() } catch (_: Exception) { }
         try { recorder?.release() } catch (_: Exception) { }
@@ -220,5 +225,8 @@ class VoiceSession(
         noiseSuppressor = null
         audioManager.isSpeakerphoneOn = oldSpeaker
         audioManager.mode = oldAudioMode
+        playbackExecutor.shutdownNow()
+        http.dispatcher.executorService.shutdown()
+        http.connectionPool.evictAll()
     }
 }
