@@ -55,7 +55,7 @@ fun App(vm: JarvisVM) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var showCallScreen by rememberSaveable { mutableStateOf(false) }
     if (showCallScreen) {
-        InAppCallScreen(onEnd = { showCallScreen = false })
+        InAppCallScreen(vm = vm, onEnd = { showCallScreen = false })
         return
     }
     Scaffold(
