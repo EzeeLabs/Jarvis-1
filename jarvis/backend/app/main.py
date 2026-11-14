@@ -12,6 +12,7 @@ from .calls import CallError, CallManager
 from .db import DB
 from .exotel import ExotelClient
 from .realtime import Bridge
+from .voice import InAppVoiceBridge
 from .security import E164, RateLimiter, check_token, make_token, mask, verify_password
 from .timeutil import IST, epoch_ms, iso, now_utc
 
@@ -101,7 +102,7 @@ async def login(body: Login, req: Request):
 @app.get("/api/status", dependencies=[Depends(auth)])
 def status():
     return {"server_now_ms": int(now_utc().timestamp() * 1000), "ist": now_utc().astimezone(IST).strftime("%d %b %Y %H:%M IST"),
-            "calls_enabled": S.calls_enabled, "exotel_configured": S.exotel_configured, "openai_configured": S.openai_configured,
+            "calls_enabled": S.calls_enabled, "exotel_configured": S.exotel_configured, "openai_configured": S.openai_configured, "voice_enabled": S.openai_configured,
             "public_url_set": bool(S.public_base_url), "approved_number": mask(S.approved_number),
             "number_valid": bool(E164.match(S.approved_number or "")), "max_call_seconds": S.max_call_seconds,
             "pending_call": call_out(mgr.pending()), "last_call": call_out(mgr.latest())}
@@ -153,6 +154,30 @@ async def exotel_webhook(call_id: str, req: Request):
     log.info("exotel callback %s: %s", call_id, {k: v for k, v in fields.items() if k.lower() not in ("from", "to")})
     mgr.apply_callback(call_id, fields)
     return {"ok": True}
+
+
+@app.websocket("/ws/voice")
+async def in_app_voice_ws(ws: WebSocket):
+    # Authenticate the WebSocket upgrade with the same short-lived bearer token
+    # used by the app's HTTPS API. Never place the OpenAI key on the device.
+    header = ws.headers.get("authorization", "")
+    token = header[7:] if header.startswith("Bearer ") else ""
+    client_ip = ws.client.host if ws.client else "?"
+    if not token or not check_token(S.jwt_secret, token):
+        await ws.close(code=1008)
+        return
+    if not S.openai_configured:
+        await ws.close(code=1011)
+        return
+    if not limiter.allow("voice:" + client_ip, 3, 60):
+        await ws.close(code=1013)
+        return
+    await ws.accept()
+    await InAppVoiceBridge(ws, db, S).run()
+    try:
+        await ws.close()
+    except Exception:
+        pass
 
 
 @app.websocket("/ws/exotel/{token}")
