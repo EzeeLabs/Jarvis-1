@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class VoiceSession(
     context: Context,
-    baseUrl: String,
-    token: String,
+    private val baseUrl: String,
+    private val token: String,
     private val onState: (String) -> Unit,
     private val onError: (String) -> Unit
 ) {
