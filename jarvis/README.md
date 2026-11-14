@@ -1,78 +1,89 @@
-# JARVIS V1.0 — EzeeLabs phone assistant
+# JARVIS V1.0 — EzeeLabs in-app voice assistant
 
-JARVIS places a **real phone call** (Exotel → your Android number) and, when you answer, bridges the call to
-**OpenAI Realtime** for a two-way voice conversation. A FastAPI server owns everything that matters (scheduling,
-dialing, limits, data, keys); the Android app is only a remote control.
+JARVIS is an Android-first personal assistant for EzeeLabs. The current voice direction is an **in-app voice conversation**: no cellular phone call and no Exotel provider is required.
+
+## Current architecture
 
 ```
-Android app ──HTTPS──▶ FastAPI (scheduler, SQLite, auth) ──REST──▶ Exotel "Connect Voice AI" ──PSTN──▶ your phone
-                              ▲  WSS /ws/exotel/{one-time-token}  (PCM16 24 kHz)
-                              └────────── bridge ──────────▶ OpenAI Realtime (WebSocket, tools = your DB)
+Android app
+  ├─ 3-minute countdown + OnePlus-inspired call screen
+  ├─ microphone capture / speaker playback (PCM16, mono, 24 kHz)
+  └─ authenticated WebSocket: /ws/voice
+            │
+            ▼
+FastAPI backend
+  ├─ verifies the app's bearer token
+  ├─ keeps the OpenAI API key server-side
+  ├─ loads enabled JARVIS memory and business tools
+  └─ proxies audio/events to OpenAI Realtime
 ```
 
-## What is verified, and what is not (read this first)
+The app does not contain the OpenAI API key. Android sends audio only to the authenticated JARVIS backend; the backend connects to OpenAI. The configured default is `gpt-realtime-2.1-mini` with the `cedar` voice.
 
-| Area | Status |
+## Current implementation status
+
+| Feature | Status |
 |---|---|
-| Call lifecycle, 3-minute delayed call, duplicate-press protection (25 concurrent presses → 1 row), cancel, cooldown, daily cap, restart safety, IST schedules (daily / weekly / once), no-answer detection | **Unit-tested, passing** (29 tests, `python -m unittest discover -s tests -t .`) |
-| Business analytics (IST day/week/month boundaries, growth), auth/JWT/scrypt/rate limiter, audio re-chunking, the whole Exotel⇄OpenAI bridge (greeting, tool calls from the DB, barge-in, hang-up) | **Unit-tested against fake sockets** |
-| FastAPI route layer (`app/main.py`) | Compiles; **not run** (FastAPI could not be installed where this was built). First thing to do: run it. |
-| Real Exotel call, real OpenAI session, real audio quality/latency | **Never run.** Needs your credentials. |
-| Android app | **Never compiled** (no Android SDK here). Written against AGP 8.5.2 / Kotlin 1.9.24 / Compose BOM 2024.06. Expect to fix a few compile errors on the first CI build. |
+| Android dashboard and business/memory sections | Existing |
+| OnePlus-inspired animated in-app call screen | Implemented |
+| Three-minute countdown | Implemented in the open app |
+| Microphone permission and PCM audio capture | Implemented |
+| Speaker playback, mute and speaker/earpiece controls | Implemented |
+| Authenticated backend WebSocket | Implemented |
+| Backend-to-OpenAI Realtime bridge | Implemented |
+| Business tools and enabled memory in voice prompt | Connected in bridge |
+| Backend unit tests | Passing in CI |
+| Android debug APK compile | CI compile passed on an intermediate commit; rebuild after latest changes |
+| Real OpenAI session and physical-device audio test | Not yet tested; requires server configuration and an actual device |
+| Background countdown/push notification for in-app voice | Not implemented yet; keep JARVIS open during the countdown and conversation |
 
-Things I could not confirm from the docs and you must check on first real use:
-1. Exotel's **status-callback field names** (`Status` / `CallStatus` are read tolerantly). Look at the `exotel callback` log lines after a call.
-2. Whether your **trial** Exotel account allows the `Calls/connect` AgentStream endpoint, or only paid accounts do.
-3. OpenAI model name (`gpt-realtime` default, configurable) and voice (`cedar`, configurable). OpenAI has no "British" voice setting; the accent comes from the instructions, so it is an approximation.
-4. Exotel docs call the number being dialled `From` and your ExoPhone `CallerId` for this endpoint; implemented exactly as documented.
+**Important:** a successful APK build does not prove microphone permissions, device audio routing, server deployment, API access, or voice quality. Those still need a real-device end-to-end test.
 
-## Provider choice (India)
+## Backend setup
 
-Chosen: **Exotel**, because it is an Indian provider with TRAI-compliant onboarding and a documented
-bidirectional WebSocket "Connect Voice AI" API (`POST https://api.in.exotel.com/v1/Accounts/{sid}/Calls/connect`,
-`StreamUrl`, `StreamType=bidirectional`, `TimeLimit`, `StatusCallback`). I did **not** verify Twilio's India outbound
-rules and did not pick it. I did not evaluate other Indian providers.
+1. Deploy the backend using the existing Docker configuration and a public HTTPS domain.
+2. In `jarvis/backend`, copy `.env.example` to `.env`.
+3. Generate `JWT_SECRET` and `ADMIN_PASSWORD_HASH` with `python -m app.make_secrets`.
+4. Set `OPENAI_API_KEY` on the backend host only. Do not put it in Android source, the APK, GitHub, screenshots, or messages.
+5. Keep `OPENAI_REALTIME_MODEL=gpt-realtime-2.1-mini` and `OPENAI_VOICE=cedar` unless you intentionally change them.
+6. Keep the server's `.env` private and restrict its file permissions. Restart/rebuild the backend after changing it.
+7. Check `https://YOUR-DOMAIN/health`, then sign in to the Android app using the HTTPS server URL and the admin password.
 
-Constraints from Exotel's docs:
-- **KYC is mandatory** (business documents such as PAN/GST or equivalent) before production numbers and calls to non-whitelisted numbers.
-- **Trial accounts** can only call **verified (whitelisted) numbers**, use a shared trial ExoPhone, and have limited credits (sources disagree on the amount; check your dashboard). Your own number must be whitelisted.
-- Calls only ever go to `APPROVED_NUMBER`. DND/NDNC rules apply to Exotel's side; this is a call to yourself.
+No Exotel account, caller ID, approved phone number, or cellular calling credits are needed for this in-app voice path. The old Exotel modules remain in the repository as legacy code but are not used by the new dashboard voice button.
 
-## Costs (check current pricing pages; I did not verify prices)
-- **Exotel**: free trial credits, then prepaid credits per minute + ExoPhone rental after KYC.
-- **OpenAI**: Realtime audio is billed per audio token (input and output). A 10-minute cap (`MAX_CALL_SECONDS`) and the daily cap (`MAX_CALLS_PER_DAY`) bound your spend.
-- **Server**: must be always-on with a public HTTPS domain (scheduled calls need a running process). Free tiers that sleep when idle will miss calls. A small VPS or an always-free cloud VM works; verify current terms.
-- **Android build**: GitHub Actions (free tier) builds the APK; no laptop needed.
-- Domain: any, or a free DNS name pointing at the VPS (Caddy fetches the HTTPS certificate automatically).
+## Costs and account ownership
 
-## Setup (phone-only workflow)
+- The Realtime API is usage-billed; it is not automatically free. The mini Realtime model is the lower-cost Realtime option in the current model family, but audio input and output are still billed by token usage.
+- Server hosting/domain costs depend on the provider.
+- Since API billing and account setup require an adult account holder, a parent or guardian must handle any account, payment method, or spending limit. Do not add payment details yourself.
+- Keep the session duration limit configured and monitor usage before repeated testing.
 
-1. **Get the code on GitHub.** In Termux: `pkg install git unzip`, unzip this archive, `git init`, add your repo, push (use a GitHub personal access token as the password). The workflow `.github/workflows/android.yml` then builds the APK on every push to `android/` and runs the backend tests.
-2. **Server**: create a small Linux VPS, point a domain at it, install Docker (`curl -fsSL https://get.docker.com | sh`), `git clone` your repo there (from Termux use `ssh` for all server commands).
-3. **Secrets**: `cd backend && cp .env.example .env && python3 -m app.make_secrets` (prints `ADMIN_PASSWORD_HASH`, `JWT_SECRET`, `WEBHOOK_SECRET`; paste into `.env`). Set `APPROVED_NUMBER`, `PUBLIC_BASE_URL`, Exotel and OpenAI values. `chmod 600 .env`. Leave `CALLS_ENABLED=false`.
-4. **Run**: `cd deploy && DOMAIN=jarvis.example.com docker compose up -d --build`. Check `https://jarvis.example.com/health`.
-5. **App**: download `app-debug.apk` from the GitHub Actions run (Artifacts), install it, enter `https://jarvis.example.com` and your password.
-6. **Exotel**: sign up, whitelist your number (trial) or finish KYC, note Account SID, API key/token, and your ExoPhone → `.env`.
+## Privacy and security
 
-## Testing order (do not skip; nothing is dialled until step 4)
-1. `cd backend && python3 -m unittest discover -s tests -t .` → all pass.
-2. In the app press **Call me**: countdown runs, notifications fire, and at 0:00 the call fails with *"Calls are disabled on the server (CALLS_ENABLED=false)"*. That proves scheduling, countdown, failure display and notifications without spending money. Also test: press repeatedly (one call), **Cancel** (no call), close the app mid-countdown (countdown notification continues; server still fires).
-3. Fill in Exotel + OpenAI keys, still disabled → the failure reason should now be the same disabled message (credentials aren't touched yet).
-4. Set `CALLS_ENABLED=true`, `docker compose up -d`. Press **Call me**. Answer. Speak, interrupt it, ask "what's today's revenue?" (it must read the DB; add a test order first). Check `docker compose logs jarvis` for the `exotel callback` lines and compare with `apply_callback` in `app/calls.py`.
-5. Test failure paths: decline the call (expect *busy/no answer* with reason), and temporarily blank `EXOTEL_API_TOKEN` (expect a clear failure notification).
-6. Only then enable the seeded schedules (daily briefing / weekly report, created **disabled**) in the Calls tab.
+- OpenAI credentials stay on the backend.
+- The voice WebSocket requires the app's existing bearer token.
+- Microphone access is requested by Android at runtime.
+- Audio is streamed live for the session; the app does not intentionally save microphone audio.
+- Transcript storage remains off by default. If enabled in settings, text transcripts may be stored in the backend database.
+- Use HTTPS/WSS in deployment. Do not expose the backend database or `.env` file.
+- The repository is currently public. Make it private if you do not intend the source code to be public, and never commit credentials or personal details.
 
-## How the 3-minute call works
-- **Call me** → `POST /api/calls/call-me` creates one row with `scheduled_for = now + 180 s` (a unique DB index plus a transaction make duplicates impossible; a repeat press returns the same call).
-- The server's scheduler loop (1 s tick) atomically claims the row at the due time and calls Exotel **once**. Timing is "dial at T+180 s"; the phone rings a few seconds later.
-- The app shows the countdown from the server's timestamp (clock-skew corrected) and starts a foreground service that keeps a system countdown notification and posts *about to call* (≈30 s before), *initiated*, and *failed + reason* notifications, even after you close the app. If the phone kills that service, the call still happens; you only lose the notifications.
-- If the server was down at the due time and is >90 s late, the call is **not** placed late; it is marked failed with that reason.
-- No-answer / busy / failed come from Exotel's callback, or "no answer" is inferred if the call never connects in 120 s.
+## Testing checklist
 
-## Safety summary
-Password-protected API (scrypt hash, 30-day JWT), per-IP rate limits, login lockout window, only `APPROVED_NUMBER` is ever dialled, one-time stream token per call (WebSocket rejected otherwise), webhook secret, `CALLS_ENABLED` master switch, call length cap (plus Exotel `TimeLimit`), cooldown, daily cap, no audio recording (`Record=false`), transcripts off by default, DB file `chmod 600`, API keys server-side only, HTTPS-only app. Run exactly **one** uvicorn worker (the scheduler is in-process).
+1. Run backend tests: `python -m unittest discover -s tests -t .`.
+2. Build the Android app: `gradle --no-daemon -p jarvis/android assembleDebug`.
+3. Install the debug APK on an Android device.
+4. Sign in to the deployed HTTPS backend.
+5. Confirm the backend reports voice as configured.
+6. Tap the voice-session button and grant microphone permission.
+7. Keep the app open through the three-minute countdown.
+8. Confirm JARVIS speaks first, then test two-way conversation, mute, speaker/earpiece, and end session.
+9. Check backend logs for connection errors. Do not share API keys or full logs containing secrets.
 
 ## Known limits / next steps
-- Single owner, SQLite, in-memory rate limiter (fine for one user).
-- Notifications rely on a foreground service rather than Firebase push; FCM would also cover a killed app.
-- Android signing is debug-only; add a release keystore if you want Play distribution.
+
+- The three-minute timer currently runs in the open Android screen. Background scheduling and a notification-to-resume flow are future work.
+- Audio routing, echo cancellation, and sample-rate support vary by Android device and need physical-device testing.
+- The app currently has a simple single-session audio client. Reconnection and robust network recovery need more work.
+- The server currently uses a single-process SQLite design; keep one Uvicorn worker.
+- Android builds are debug-signed. A release signing setup is needed before public distribution.
