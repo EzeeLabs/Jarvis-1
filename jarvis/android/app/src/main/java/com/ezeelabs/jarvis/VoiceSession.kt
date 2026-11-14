@@ -69,6 +69,10 @@ class VoiceSession(
         onState("connecting")
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (released.get()) {
+                    webSocket.close(1000, "Session already ended")
+                    return
+                }
                 try {
                     startAudio()
                     onState("listening")
