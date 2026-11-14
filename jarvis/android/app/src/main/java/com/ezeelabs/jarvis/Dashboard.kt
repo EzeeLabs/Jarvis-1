@@ -53,6 +53,11 @@ fun App(vm: JarvisVM) {
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.error) { vm.error?.let { snack.showSnackbar(it); vm.clearError() } }
     var tab by rememberSaveable { mutableStateOf(0) }
+    var showCallScreen by rememberSaveable { mutableStateOf(false) }
+    if (showCallScreen) {
+        InAppCallScreen(onEnd = { showCallScreen = false })
+        return
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snack) },
@@ -67,7 +72,7 @@ fun App(vm: JarvisVM) {
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize()) {
             if (!vm.loggedIn) LoginScreen(vm) else when (tab) {
-                0 -> Dashboard(vm)
+                0 -> Dashboard(vm, onStartCall = { showCallScreen = true })
                 1 -> BusinessTab(vm)
                 2 -> MemoryTab(vm)
                 3 -> CallsTab(vm)
@@ -99,7 +104,7 @@ fun LoginScreen(vm: JarvisVM) {
 }
 
 @Composable
-fun Dashboard(vm: JarvisVM) {
+fun Dashboard(vm: JarvisVM, onStartCall: () -> Unit) {
     val st = vm.status
     val pending = st?.optJSONObject("pending_call")
     val last = st?.optJSONObject("last_call")
@@ -119,7 +124,7 @@ fun Dashboard(vm: JarvisVM) {
         if (st != null && (!st.optBoolean("exotel_configured") || !st.optBoolean("openai_configured") || !st.optBoolean("number_valid")))
             Panel { Text("Server setup incomplete", color = Bad); Text("Exotel / OpenAI / approved number not fully configured.", color = Muted, fontSize = 13.sp) }
 
-        CallCard(vm, pending, last, now)
+        CallCard(vm, onStartCall)
 
         vm.summary?.let { s ->
             Panel {
@@ -136,35 +141,22 @@ fun Dashboard(vm: JarvisVM) {
 }
 
 @Composable
-fun CallCard(vm: JarvisVM, pending: JSONObject?, last: JSONObject?, now: Long) {
+fun CallCard(vm: JarvisVM, onStartCall: () -> Unit) {
     Panel {
-        val status = pending?.optString("status")
-        when (status) {
-            "scheduled", "dialing" -> {
-                val target = pending!!.getLong("scheduled_for_ms") - vm.clockOffsetMs // in phone-clock terms
-                val remain = (target - now).coerceAtLeast(0)
-                Text("Call scheduled", color = Muted)
-                if (remain > 0) {
-                    Text(String.format("%02d:%02d", remain / 60000, (remain / 1000) % 60), fontSize = 56.sp, fontWeight = FontWeight.Light, color = Accent)
-                    LinearProgressIndicator(progress = { (1f - remain / 180000f).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                } else Text("Placing the call…", fontSize = 24.sp, color = Accent)
-                Text("Expected at ${clock(target)}", color = Muted)
-                Text("This runs on the server: it continues even if you close the app.", color = Muted, fontSize = 12.sp)
-                if (status == "scheduled") OutlinedButton(onClick = { vm.cancelCall(pending!!.getString("id")) }, modifier = Modifier.fillMaxWidth()) { Text("Cancel call") }
-            }
-            "initiated" -> { Text("JARVIS is calling you", fontSize = 22.sp, color = Accent); Text("Answer your phone. The call was initiated.", color = Muted) }
-            "in_progress" -> { Text("Call in progress", fontSize = 22.sp, color = Good); Text("Connected to JARVIS.", color = Muted) }
-            else -> {
-                Button(onClick = { vm.callMe() }, enabled = !vm.busy && vm.online, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                    if (vm.busy) CircularProgressIndicator(Modifier.height(20.dp), strokeWidth = 2.dp) else Text("Call me in 3 minutes", fontSize = 16.sp)
-                }
-                Text("JARVIS will place a real phone call to your registered number.", color = Muted, fontSize = 12.sp)
-                if (last != null && last.optString("status") in listOf("failed", "busy", "no_answer") && isRecent(last.str("ended_at"))) {
-                    Text("Last call failed", color = Bad, fontWeight = FontWeight.Medium)
-                    Text(last.str("failure_reason").ifEmpty { "No reason reported." }, color = Bad, fontSize = 13.sp)
-                }
-            }
+        Text("JARVIS voice assistant", color = Muted)
+        Text("Talk to JARVIS through the app — no normal phone call required.", color = MaterialTheme.colorScheme.onSurface)
+        Button(
+            onClick = onStartCall,
+            enabled = vm.online,
+            modifier = Modifier.fillMaxWidth().height(56.dp)
+        ) {
+            Text("Start voice session · 3 min", fontSize = 16.sp)
         }
+        Text(
+            if (vm.online) "The three-minute countdown and OnePlus-inspired call screen are ready for UI testing."
+            else "Connect to your JARVIS server to start. The in-app voice engine is still being built.",
+            color = Muted, fontSize = 12.sp
+        )
     }
 }
 
