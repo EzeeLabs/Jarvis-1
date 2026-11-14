@@ -54,7 +54,7 @@ def load() -> Settings:
         exotel_host=os.getenv("EXOTEL_HOST", "api.in.exotel.com"),
         exotel_caller_id=os.getenv("EXOTEL_CALLER_ID", ""),
         openai_key=os.getenv("OPENAI_API_KEY", ""),
-        openai_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime"),
+        openai_model=os.getenv("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1-mini"),
         openai_voice=os.getenv("OPENAI_VOICE", "cedar"),
         max_call_seconds=int(os.getenv("MAX_CALL_SECONDS", "600")),
         cooldown_seconds=int(os.getenv("CALL_COOLDOWN_SECONDS", "120")),
