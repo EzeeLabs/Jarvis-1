@@ -105,25 +105,13 @@ fun LoginScreen(vm: JarvisVM) {
 
 @Composable
 fun Dashboard(vm: JarvisVM, onStartCall: () -> Unit) {
-    val st = vm.status
-    val pending = st?.optJSONObject("pending_call")
-    val last = st?.optJSONObject("last_call")
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(250) } }
-    LaunchedEffect(pending?.optString("status")) { vm.loadAnalytics("today") }
+    LaunchedEffect(Unit) { vm.loadAnalytics("today") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("JARVIS", fontSize = 30.sp, fontWeight = FontWeight.Light, color = Accent)
             Text(if (vm.online) "● Connected" else "● Offline", color = if (vm.online) Good else Bad)
         }
-        if (st != null && !st.optBoolean("calls_enabled")) Panel {
-            Text("Calls are disabled on the server", color = Bad, fontWeight = FontWeight.Medium)
-            Text("A scheduled call will fail with this reason until CALLS_ENABLED=true is set after setup and testing.", color = Muted, fontSize = 13.sp)
-        }
-        if (st != null && (!st.optBoolean("exotel_configured") || !st.optBoolean("openai_configured") || !st.optBoolean("number_valid")))
-            Panel { Text("Server setup incomplete", color = Bad); Text("Exotel / OpenAI / approved number not fully configured.", color = Muted, fontSize = 13.sp) }
-
         CallCard(vm, onStartCall)
 
         vm.summary?.let { s ->
